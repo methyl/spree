@@ -5,7 +5,8 @@ describe Spree::Shipment do
   let(:order) { mock_model Spree::Order, backordered?: false,
                                          canceled?: false,
                                          can_ship?: true,
-                                         currency: 'USD' }
+                                         currency: 'USD',
+                                         touch: true }
   let(:shipping_method) { create(:shipping_method, name: "UPS") }
   let(:shipment) do
     shipment = Spree::Shipment.new order: order
@@ -17,6 +18,14 @@ describe Spree::Shipment do
   end
 
   let(:variant) { mock_model(Spree::Variant) }
+  let(:line_item) { mock_model(Spree::LineItem, variant: variant) }
+
+  # Regression test for #4063
+  context "number generation" do
+    it "creates a 11-length number" do
+      shipment.number.length.should == 11
+    end
+  end
 
   it 'is backordered if one if its inventory_units is backordered' do
     shipment.stub(inventory_units: [
@@ -63,7 +72,7 @@ describe Spree::Shipment do
     end
 
     context "variant was removed" do
-      before { variant.product.destroy }
+      before { variant.destroy }
 
       it "still returns variant expected" do
         expect(shipment.manifest.first.variant).to eq variant
@@ -118,9 +127,13 @@ describe Spree::Shipment do
       end
 
       context 'to_package' do
+        let(:inventory_units) do
+          [build(:inventory_unit, line_item: line_item, variant: variant, state: 'on_hand'),
+           build(:inventory_unit, line_item: line_item, variant: variant, state: 'backordered')]
+        end
+
         it 'should use symbols for states when adding contents to package' do
-          shipment.stub_chain(:inventory_units, includes: [ build(:inventory_unit, variant: variant, state: 'on_hand'),
-                                                            build(:inventory_unit, variant: variant, state: 'backordered') ] )
+          shipment.stub_chain(:inventory_units, includes: inventory_units)
           package = shipment.to_package
           package.on_hand.count.should eq 1
           package.backordered.count.should eq 1
@@ -128,12 +141,12 @@ describe Spree::Shipment do
       end
     end
   end
-  
+
   context "#update!" do
     shared_examples_for "immutable once shipped" do
       it "should remain in shipped state once shipped" do
         shipment.state = 'shipped'
-        shipment.should_receive(:update_column).with(:state, 'shipped')
+        shipment.should_receive(:update_columns).with(state: 'shipped', updated_at: kind_of(Time))
         shipment.update!(order)
       end
     end
@@ -141,7 +154,7 @@ describe Spree::Shipment do
     shared_examples_for "pending if backordered" do
       it "should have a state of pending if backordered" do
         shipment.stub(inventory_units: [mock_model(Spree::InventoryUnit, backordered?: true)])
-        shipment.should_receive(:update_column).with(:state, 'pending')
+        shipment.should_receive(:update_columns).with(state: 'pending', updated_at: kind_of(Time))
         shipment.update!(order)
       end
     end
@@ -149,7 +162,7 @@ describe Spree::Shipment do
     context "when order cannot ship" do
       before { order.stub can_ship?: false }
       it "should result in a 'pending' state" do
-        shipment.should_receive(:update_column).with(:state, 'pending')
+        shipment.should_receive(:update_columns).with(state: 'pending', updated_at: kind_of(Time))
         shipment.update!(order)
       end
     end
@@ -157,7 +170,7 @@ describe Spree::Shipment do
     context "when order is paid" do
       before { order.stub paid?: true }
       it "should result in a 'ready' state" do
-        shipment.should_receive(:update_column).with(:state, 'ready')
+        shipment.should_receive(:update_columns).with(state: 'ready', updated_at: kind_of(Time))
         shipment.update!(order)
       end
       it_should_behave_like 'immutable once shipped'
@@ -168,7 +181,7 @@ describe Spree::Shipment do
       before { order.stub paid?: false }
       it "should result in a 'pending' state" do
         shipment.state = 'ready'
-        shipment.should_receive(:update_column).with(:state, 'pending')
+        shipment.should_receive(:update_columns).with(state: 'pending', updated_at: kind_of(Time))
         shipment.update!(order)
       end
       it_should_behave_like 'immutable once shipped'
@@ -179,7 +192,7 @@ describe Spree::Shipment do
       before { order.stub payment_state: 'credit_owed', paid?: true }
       it "should result in a 'ready' state" do
         shipment.state = 'pending'
-        shipment.should_receive(:update_column).with(:state, 'ready')
+        shipment.should_receive(:update_columns).with(state: 'ready', updated_at: kind_of(Time))
         shipment.update!(order)
       end
       it_should_behave_like 'immutable once shipped'
@@ -191,21 +204,9 @@ describe Spree::Shipment do
         shipment.state = 'pending'
         shipment.should_receive :after_ship
         shipment.stub determine_state: 'shipped'
-        shipment.should_receive(:update_column).with(:state, 'shipped')
+        shipment.should_receive(:update_columns).with(state: 'shipped', updated_at: kind_of(Time))
         shipment.update!(order)
       end
-    end
-  end
-
-  context "when track_inventory is false" do
-    before { Spree::Config.set track_inventory_levels: false }
-    after { Spree::Config.set track_inventory_levels: true }
-
-    it "should not use the line items from order when track_inventory_levels is false" do
-      line_items = [mock_model(Spree::LineItem)]
-      order.stub complete?: true
-      order.stub line_items: line_items
-      shipment.line_items.should == line_items
     end
   end
 
@@ -246,10 +247,38 @@ describe Spree::Shipment do
     end
 
     it 'restocks the items' do
-      shipment.stub_chain(inventory_units: [mock_model(Spree::InventoryUnit, variant: variant)])
+      shipment.stub_chain(inventory_units: [mock_model(Spree::InventoryUnit, state: "on_hand", line_item: line_item, variant: variant)])
       shipment.stock_location = mock_model(Spree::StockLocation)
       shipment.stock_location.should_receive(:restock).with(variant, 1, shipment)
       shipment.after_cancel
+    end
+
+    context "with backordered inventory units" do
+      let(:order) { create(:order) }
+      let(:variant) { create(:variant) }
+      let(:other_order) { create(:order) }
+
+      before do
+        order.contents.add variant
+        order.create_proposed_shipments
+
+        other_order.contents.add variant
+        other_order.create_proposed_shipments
+      end
+
+      it "doesn't fill backorders when restocking inventory units" do
+        shipment = order.shipments.first
+        expect(shipment.inventory_units.count).to eq 1
+        expect(shipment.inventory_units.first).to be_backordered
+
+        other_shipment = other_order.shipments.first
+        expect(other_shipment.inventory_units.count).to eq 1
+        expect(other_shipment.inventory_units.first).to be_backordered
+
+        expect {
+          shipment.cancel!
+        }.not_to change { other_shipment.inventory_units.first.state }
+      end
     end
   end
 
@@ -265,7 +294,7 @@ describe Spree::Shipment do
     end
 
     it 'unstocks them items' do
-      shipment.stub_chain(inventory_units: [mock_model(Spree::InventoryUnit, variant: variant)])
+      shipment.stub_chain(inventory_units: [mock_model(Spree::InventoryUnit, line_item: line_item, variant: variant)])
       shipment.stock_location = mock_model(Spree::StockLocation)
       shipment.stock_location.should_receive(:unstock).with(variant, 1, shipment)
       shipment.after_resume
@@ -391,17 +420,20 @@ describe Spree::Shipment do
   end
 
   context "set up new inventory units" do
+    # let(:line_item) { double(
     let(:variant) { double("Variant", id: 9) }
+
     let(:inventory_units) { double }
+
     let(:params) do
-      { variant_id: variant.id, state: 'on_hand', order_id: order.id }
+      { variant_id: variant.id, state: 'on_hand', order_id: order.id, line_item_id: line_item.id }
     end
 
     before { shipment.stub inventory_units: inventory_units }
 
     it "associates variant and order" do
       expect(inventory_units).to receive(:create).with(params)
-      unit = shipment.set_up_inventory('on_hand', variant, order)
+      unit = shipment.set_up_inventory('on_hand', variant, order, line_item)
     end
   end
 

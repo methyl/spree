@@ -16,8 +16,62 @@ describe "Product scopes" do
       product.taxons << @child_taxon
     end
 
+    it "calling Product.in_taxon returns products in child taxons" do
+      product.taxons -= [@child_taxon]
+      product.taxons.count.should == 1
+
+      Spree::Product.in_taxon(@parent_taxon).should include(product)
+    end
+
     it "calling Product.in_taxon should not return duplicate records" do
       Spree::Product.in_taxon(@parent_taxon).to_a.count.should == 1
+    end
+
+    it "orders products based on their ordering within the classification" do
+      product_2 = create(:product)
+      product_2.taxons << @parent_taxon
+
+      product_root_classification = Spree::Classification.find_by(:taxon => @parent_taxon, :product => product)
+      product_root_classification.update_column(:position, 1)
+
+      product_2_root_classification = Spree::Classification.find_by(:taxon => @parent_taxon, :product => product_2)
+      product_2_root_classification.update_column(:position, 2)
+
+      Spree::Product.in_taxon(@parent_taxon).should == [product, product_2]
+      product_2_root_classification.insert_at(1)
+      Spree::Product.in_taxon(@parent_taxon).should == [product_2, product]
+    end
+  end
+
+  context '#add_simple_scopes' do
+    let(:simple_scopes) { [:ascend_by_updated_at, :descend_by_name] }
+
+    before do
+      Spree::Product.add_simple_scopes(simple_scopes)
+    end
+
+    context 'define scope' do
+      context 'ascend_by_updated_at' do
+        context 'on class' do
+          it { Spree::Product.ascend_by_updated_at.to_sql.should eq Spree::Product.order("#{Spree::Product.quoted_table_name}.updated_at ASC").to_sql }
+        end
+
+        context 'on ActiveRecord::Relation' do
+          it { Spree::Product.limit(2).ascend_by_updated_at.to_sql.should eq Spree::Product.limit(2).order("#{Spree::Product.quoted_table_name}.updated_at ASC").to_sql }
+          it { Spree::Product.limit(2).ascend_by_updated_at.to_sql.should eq Spree::Product.ascend_by_updated_at.limit(2).to_sql }
+        end
+      end
+
+      context 'descend_by_name' do
+        context 'on class' do
+          it { Spree::Product.descend_by_name.to_sql.should eq Spree::Product.order("#{Spree::Product.quoted_table_name}.name DESC").to_sql }
+        end
+
+        context 'on ActiveRecord::Relation' do
+          it { Spree::Product.limit(2).descend_by_name.to_sql.should eq Spree::Product.limit(2).order("#{Spree::Product.quoted_table_name}.name DESC").to_sql }
+          it { Spree::Product.limit(2).descend_by_name.to_sql.should eq Spree::Product.descend_by_name.limit(2).to_sql }
+        end
+      end
     end
   end
 end

@@ -2,7 +2,7 @@ require 'ostruct'
 
 module Spree
   class Shipment < ActiveRecord::Base
-    belongs_to :order, class_name: 'Spree::Order'
+    belongs_to :order, class_name: 'Spree::Order', touch: true
     belongs_to :address, class_name: 'Spree::Address'
     belongs_to :stock_location, class_name: 'Spree::StockLocation'
 
@@ -22,7 +22,7 @@ module Spree
     accepts_nested_attributes_for :address
     accepts_nested_attributes_for :inventory_units
 
-    make_permalink field: :number
+    make_permalink field: :number, length: 11
 
     scope :shipped, -> { with_state('shipped') }
     scope :ready,   -> { with_state('ready') }
@@ -71,6 +71,10 @@ module Spree
 
     def backordered?
       inventory_units.any? { |inventory_unit| inventory_unit.backordered? }
+    end
+
+    def ready_or_pending?
+      self.ready? || self.pending?
     end
 
     def shipped=(value)
@@ -148,20 +152,22 @@ module Spree
       !shipped?
     end
 
+    ManifestItem = Struct.new(:line_item, :variant, :quantity, :states)
+
     def manifest
       inventory_units.group_by(&:variant).map do |variant, units|
-        states = {}
-        units.group_by(&:state).each { |state, iu| states[state] = iu.count }
-        OpenStruct.new(variant: variant, quantity: units.length, states: states)
-      end
+        units.group_by(&:line_item).map do |line_item, units|
+
+          states = {}
+          units.group_by(&:state).each { |state, iu| states[state] = iu.count }
+
+          ManifestItem.new(line_item, variant, units.length, states)
+        end
+      end.flatten
     end
 
     def line_items
-      if order.complete? and Spree::Config[:track_inventory_levels]
-        order.line_items.select { |li| inventory_units.pluck(:variant_id).include?(li.variant_id) }
-      else
-        order.line_items
-      end
+      inventory_units.includes(:line_item).map(&:line_item).uniq
     end
 
     def finalize!
@@ -183,7 +189,10 @@ module Spree
     def update!(order)
       old_state = state
       new_state = determine_state(order)
-      update_column :state, new_state
+      update_columns(
+        state: new_state,
+        updated_at: Time.now,
+      )
       after_ship if new_state == 'shipped' and old_state != 'shipped'
     end
 
@@ -209,19 +218,28 @@ module Spree
     end
 
     def inventory_units_for(variant)
-      inventory_units.group_by(&:variant_id)[variant.id] || []
+      inventory_units.where(variant_id: variant.id)
+    end
+
+    def inventory_units_for_item(line_item, variant = nil)
+      inventory_units.where(line_item_id: line_item.id, variant_id: line_item.variant.id || variant.id)
     end
 
     def to_package
       package = Stock::Package.new(stock_location, order)
       inventory_units.includes(:variant).each do |inventory_unit|
-        package.add inventory_unit.variant, 1, inventory_unit.state_name
+        package.add inventory_unit.line_item, 1, inventory_unit.state_name
       end
       package
     end
 
-    def set_up_inventory(state, variant, order)
-      self.inventory_units.create(variant_id: variant.id, state: state, order_id: order.id)
+    def set_up_inventory(state, variant, order, line_item)
+      self.inventory_units.create(
+        state: state,
+        variant_id: variant.id,
+        order_id: order.id,
+        line_item_id: line_item.id
+      )
     end
 
     def persist_cost
@@ -232,7 +250,8 @@ module Spree
     def update_amounts
       self.update_columns(
         cost: selected_shipping_rate.cost,
-        adjustment_total: adjustments.map(&:update!).compact.sum
+        adjustment_total: adjustments.map(&:update!).compact.sum,
+        updated_at: Time.now,
       )
     end
 
@@ -243,7 +262,13 @@ module Spree
       end
 
       def manifest_restock(item)
-        stock_location.restock item.variant, item.quantity, self
+        if item.states["on_hand"].to_i > 0
+         stock_location.restock item.variant, item.states["on_hand"], self
+        end
+
+        if item.states["backordered"].to_i > 0
+          stock_location.restock_backordered item.variant, item.states["backordered"]
+        end
       end
 
       def generate_shipment_number
@@ -276,7 +301,10 @@ module Spree
 
       def update_order_shipment_state
         new_state = OrderUpdater.new(order).update_shipment_state
-        order.update_column(:shipment_state, new_state)
+        order.update_columns(
+          shipment_state: new_state,
+          updated_at: Time.now,
+        )
       end
 
       def send_shipped_email

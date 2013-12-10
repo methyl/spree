@@ -41,6 +41,27 @@ module Spree
       assert_unauthorized!
     end
 
+    context "the current api user is anonymous" do
+      let(:current_api_user) { double(anonymous?: true) }
+
+      it "returns a 401" do
+        api_get :mine
+
+        response.status.should == 401
+      end
+    end
+
+    context "the current api user is authenticated" do
+      it "can view all of their own orders" do
+        current_api_user.should_receive(:orders) { [order] }
+
+        api_get :mine
+
+        json_response["orders"].length.should == 1
+        json_response["orders"].first["number"].should == order.number
+      end
+    end
+
     it "can view their own order" do
       Order.any_instance.stub :user => current_api_user
       api_get :show, :id => order.to_param
@@ -132,6 +153,15 @@ module Spree
       expect(Order.last.line_items.first.price.to_f).to eq(variant.price)
     end
 
+    context "admin user imports order" do
+      before { current_api_user.stub has_spree_role?: true }
+
+      it "sets channel" do
+        api_post :create, :order => { channel: "amazon" }
+        expect(json_response['channel']).to eq "amazon"
+      end
+    end
+
     # Regression test for #3404
     it "does not update line item needlessly" do
       Order.should_receive(:create!).and_return(order = Spree::Order.new)
@@ -183,10 +213,20 @@ module Spree
         address
       end
 
+      context "line_items hash not present in request" do
+        it "responds successfully" do
+          api_put :update, :id => order.to_param, :order => {
+            :email => "hublock@spreecommerce.com"
+          }
+
+          expect(response).to be_success
+        end
+      end
+
       it "updates quantities of existing line items" do
         api_put :update, :id => order.to_param, :order => {
           :line_items => {
-            line_item.id => { :quantity => 10 }
+            0 => { :id => line_item.id, :quantity => 10 }
           }
         }
 
@@ -195,10 +235,26 @@ module Spree
         json_response['line_items'].first['quantity'].should == 10
       end
 
+      it "adds an extra line item" do
+        variant2 = create(:variant)
+        api_put :update, :id => order.to_param, :order => {
+          :line_items => {
+            0 => { :id => line_item.id, :quantity => 10 },
+            1 => { :variant_id => variant2.id, :quantity => 1}
+          }
+        }
+
+        response.status.should == 200
+        json_response['line_items'].count.should == 2
+        json_response['line_items'][0]['quantity'].should == 10
+        json_response['line_items'][1]['variant_id'].should == variant2.id
+        json_response['line_items'][1]['quantity'].should == 1
+      end
+
       it "cannot change the price of an existing line item" do
         api_put :update, :id => order.to_param, :order => {
           :line_items => {
-            line_item.id => { :price => 0 }
+            0 => { :id => line_item.id, :price => 0 }
           }
         }
 
@@ -250,7 +306,7 @@ module Spree
           previous_shipments = order.shipments
           api_put :update, :id => order.to_param, :order => {
             :line_items => {
-              line_item.id => { :quantity => 10 }
+              0 => { :id => line_item.id, :quantity => 10 }
             }
           }
           expect(order.reload.shipments).to be_empty
@@ -355,6 +411,14 @@ module Spree
           api_get :index
           json_response["orders"].should == []
         end
+      end
+
+      it "responds with orders updated_at with miliseconds precision" do
+        api_get :index
+        milisecond = order.updated_at.strftime("%L")
+        updated_at = json_response["orders"].first["updated_at"]
+
+        expect(updated_at.split("T").last).to have_content(milisecond)
       end
 
       context "with two orders" do

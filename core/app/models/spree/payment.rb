@@ -4,7 +4,7 @@ module Spree
 
     IDENTIFIER_CHARS = (('A'..'Z').to_a + ('0'..'9').to_a - %w(0 1 I O)).freeze
 
-    belongs_to :order, class_name: 'Spree::Order'
+    belongs_to :order, class_name: 'Spree::Order', touch: true
     belongs_to :source, polymorphic: true
     belongs_to :payment_method, class_name: 'Spree::PaymentMethod'
 
@@ -116,6 +116,14 @@ module Spree
     def payment_source
       res = source.is_a?(Payment) ? source.source : source
       res || payment_method
+    end
+
+    def is_avs_risky?
+      !(avs_response == "D" || avs_response.nil?)
+    end
+
+    def is_cvv_risky?
+      !(cvv_response_code == "M" || cvv_response_code.nil?)
     end
 
     private

@@ -624,4 +624,57 @@ describe Spree::Order do
       end
     end
   end
+
+  describe ".restart_checkout_flow" do
+    it "updates the state column to the first checkout_steps value" do
+      order = create(:order, :state => "delivery")
+      expect(order.checkout_steps).to eql ["address", "delivery", "complete"]
+      expect{ order.restart_checkout_flow }.to change{order.state}.from("delivery").to("address")
+    end
+
+    context "with custom checkout_steps" do
+      it "updates the state column to the first checkout_steps value" do
+        order = create(:order, :state => "delivery")
+        order.should_receive(:checkout_steps).and_return ["custom_step", "address", "delivery", "complete"]
+        expect{ order.restart_checkout_flow }.to change{order.state}.from("delivery").to("custom_step")
+      end
+    end
+  end
+
+  describe ".is_risky?" do
+    context "Not risky order" do
+      let(:order) { FactoryGirl.create(:order, payments: [FactoryGirl.create(:payment, avs_response: "D")]) }
+      it "returns false if the order's avs_response == 'A'" do
+        order.is_risky?.should == false
+      end
+    end
+
+    context "AVS response message" do
+      let(:order) { FactoryGirl.create(:order, payments: [FactoryGirl.create(:payment, avs_response: "A")]) }
+      it "returns true if the order has an avs_response" do
+        order.is_risky?.should == true
+      end
+    end
+
+    context "CVV response message" do
+      let(:order) { FactoryGirl.create(:order, payments: [FactoryGirl.create(:payment, cvv_response_message: "foobar'd")]) }
+      it "returns true if the order has an cvv_response_message" do
+        order.is_risky?.should == true
+      end
+    end
+
+    context "CVV response code" do
+      let(:order) { FactoryGirl.create(:order, payments: [FactoryGirl.create(:payment, cvv_response_code: "N")]) }
+      it "returns true if the order has an cvv_response_code" do
+        order.is_risky?.should == true
+      end
+    end
+
+    context "state == 'failed'" do
+      let(:order) { FactoryGirl.create(:order, payments: [FactoryGirl.create(:payment, state: 'failed')]) }
+      it "returns true if the order has state == 'failed'" do
+        order.is_risky?.should == true
+      end
+    end
+  end
 end

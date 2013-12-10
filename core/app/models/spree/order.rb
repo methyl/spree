@@ -41,7 +41,7 @@ module Spree
     has_many :adjustments, -> { order("#{Adjustment.table_name}.created_at ASC") }, as: :adjustable, dependent: :destroy
     has_many :line_item_adjustments, through: :line_items, source: :adjustments
     has_many :shipment_adjustments, through: :shipments, source: :adjustments
-    has_many :all_adjustments, class_name: Spree::Adjustment
+    has_many :all_adjustments, class_name: 'Spree::Adjustment'
     has_many :inventory_units
 
     has_many :shipments, dependent: :destroy do
@@ -124,8 +124,12 @@ module Spree
       Spree::Money.new(adjustment_total, { currency: currency })
     end
 
-    def display_tax_total
-      Spree::Money.new(tax_total, { currency: currency })
+    def display_included_tax_total
+      Spree::Money.new(included_tax_total, { currency: currency })
+    end
+
+    def display_additional_tax_total
+      Spree::Money.new(additional_tax_total, { currency: currency })
     end
 
     def display_ship_total
@@ -159,11 +163,8 @@ module Spree
 
     # If true, causes the confirmation step to happen during the checkout process
     def confirmation_required?
-      if payments.empty? and Spree::Config[:always_include_confirm_step]
-        true
-      else
-        payments.map(&:payment_method).compact.any?(&:payment_profiles_supported?)
-      end
+      Spree::Config[:always_include_confirm_step] ||
+        payments.valid.map(&:payment_method).compact.any?(&:payment_profiles_supported?)
     end
 
     # Indicates the number of items in the order
@@ -475,8 +476,15 @@ module Spree
     def ensure_updated_shipments
       if shipments.any?
         self.shipments.destroy_all
-        self.update_column(:state, "address")
+        restart_checkout_flow
       end
+    end
+
+    def restart_checkout_flow
+      self.update_columns(
+        state: checkout_steps.first,
+        updated_at: Time.now,
+      )
     end
 
     def refresh_shipment_rates
@@ -487,11 +495,19 @@ module Spree
       (bill_address.empty? && ship_address.empty?) || bill_address.same_as?(ship_address)
     end
 
-
     def set_shipments_cost
       shipments.each(&:update_amounts)
       updater.update_shipment_total
       updater.persist_totals
+    end
+
+    def is_risky?
+      self.payments.where(%{
+        (avs_response IS NOT NULL and avs_response != 'D') or
+        (cvv_response_code IS NOT NULL and cvv_response_code != 'M') or
+        cvv_response_message IS NOT NULL or
+        state = 'failed'
+      }.squish!).uniq.count > 0
     end
 
     private
@@ -528,7 +544,7 @@ module Spree
         shipments.each { |shipment| shipment.cancel! }
 
         send_cancel_email
-        self.payment_state = 'credit_owed' unless shipped?
+        self.update_column(:payment_state, 'credit_owed') unless shipped?
       end
 
       def send_cancel_email

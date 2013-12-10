@@ -47,7 +47,7 @@ module Spree
       # users should be able to set price when importing orders via api
       def permitted_line_item_attributes
         if current_api_user.has_spree_role?("admin")
-          super << [:price]
+          super << [:price, :variant_id, :sku]
         else
           super
         end
@@ -77,7 +77,7 @@ module Spree
       def authenticate_user
         unless @current_api_user
           if requires_authentication? || api_key.present?
-            unless @current_api_user = Spree.user_class.find_by_spree_api_key(api_key.to_s)
+            unless @current_api_user = Spree.user_class.find_by(spree_api_key: api_key.to_s)
               render "spree/api/errors/invalid_api_key", :status => 401 and return
             end
           else
@@ -123,7 +123,7 @@ module Spree
 
       def find_product(id)
         begin
-          product_scope.find_by_permalink!(id.to_s)
+          product_scope.find_by!(permalink: id.to_s)
         rescue ActiveRecord::RecordNotFound
           product_scope.find(id)
         end

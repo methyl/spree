@@ -6,8 +6,9 @@ module Spree
 
     attr_accessor :number, :verification_value
 
-    validates :month, :year, numericality: { only_integer: true }
+    validates :month, :year, numericality: { only_integer: true }, unless: :has_payment_profile?
     validates :number, presence: true, unless: :has_payment_profile?, on: :create
+    validates :name, presence: true
     validates :verification_value, presence: true, unless: :has_payment_profile?, on: :create
     validate :expiry_not_in_the_past
 
@@ -59,14 +60,6 @@ module Spree
       CARD_TYPES.find{|type, pattern| return type.to_s if numbers =~ pattern}.to_s
     end
 
-    def name?
-      first_name? && last_name?
-    end
-
-    def name
-      "#{first_name} #{last_name}"
-    end
-
     def verification_value?
       verification_value.present?
     end
@@ -99,7 +92,7 @@ module Spree
     end
 
     def has_payment_profile?
-      gateway_customer_profile_id.present?
+      gateway_customer_profile_id.present? || gateway_payment_profile_id.present?
     end
 
     def to_active_merchant
