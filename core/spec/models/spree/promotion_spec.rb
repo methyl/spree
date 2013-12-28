@@ -91,7 +91,13 @@ describe Spree::Promotion do
     it "does activate if newer then order" do
       @action1.should_receive(:perform).with(@payload)
       promotion.created_at = DateTime.now + 2
-      promotion.activate(@payload)
+      expect(promotion.activate(@payload)).to be_true
+    end
+
+    it "keeps track of the order" do
+      expect(promotion.orders).to be_empty
+      expect(promotion.activate(@payload)).to be_true
+      expect(promotion.orders.first).to eql @order
     end
   end
 
@@ -147,6 +153,43 @@ describe Spree::Promotion do
       promotion.usage_limit = 2
       promotion.stub(:credits_count => 1)
       promotion.should_not be_expired
+    end
+  end
+
+  context "#credits_count" do
+    let!(:promotion) do
+      promotion = Spree::Promotion.new
+      promotion.name = "Foo"
+      promotion.code = "XXX"
+      calculator = Spree::Calculator::FlatRate.new
+      promotion.tap(&:save)
+    end
+
+    let!(:action) do
+      calculator = Spree::Calculator::FlatRate.new
+      action_params = { :promotion => promotion, :calculator => calculator }
+      action = Spree::Promotion::Actions::CreateAdjustment.create(action_params)
+      promotion.actions << action
+      action
+    end
+
+    let!(:adjustment) do
+      Spree::Adjustment.create!(
+        :source => action,
+        :amount => 10,
+        :label => "Promotional adjustment"
+      )
+    end
+
+    it "counts eligible adjustments" do
+      adjustment.update_column(:eligible, true)
+      expect(promotion.credits_count).to eq(1)
+    end
+
+    # Regression test for #4112
+    it "does not count ineligible adjustments" do
+      adjustment.update_column(:eligible, false)
+      expect(promotion.credits_count).to eq(0)
     end
   end
 
@@ -251,6 +294,16 @@ describe Spree::Promotion do
       promotion = Spree::Promotion.create(:name => "A promotion", :code => "", :path => "")
       expect(promotion.code).to be_nil
       expect(promotion.path).to be_nil
+    end
+  end
+
+  # Regression test for #4081
+  describe "#with_coupon_code" do
+    context "and code stored in uppercase" do
+      let!(:promotion) { create(:promotion, :code => "MY-COUPON-123") }
+      it "finds the code with lowercase" do
+        expect(Spree::Promotion.with_coupon_code("my-coupon-123")).to eql promotion
+      end
     end
   end
 end

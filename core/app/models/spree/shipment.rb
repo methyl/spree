@@ -12,7 +12,6 @@ module Spree
     has_many :inventory_units, dependent: :delete_all
     has_many :adjustments, as: :adjustable, dependent: :delete_all
 
-    before_create :generate_shipment_number
     after_save :update_adjustments
 
     before_validation :set_cost_zero_when_nil
@@ -22,7 +21,7 @@ module Spree
     accepts_nested_attributes_for :address
     accepts_nested_attributes_for :inventory_units
 
-    make_permalink field: :number, length: 11
+    make_permalink field: :number, length: 11, prefix: 'H'
 
     scope :shipped, -> { with_state('shipped') }
     scope :ready,   -> { with_state('ready') }
@@ -63,6 +62,14 @@ module Spree
         transition from: :canceled, to: :pending
       end
       after_transition from: :canceled, to: [:pending, :ready], do: :after_resume
+
+      after_transition do |shipment, transition|
+        shipment.state_changes.create!(
+          previous_state: transition.from,
+          next_state:     transition.to,
+          name:           'shipment',
+        )
+      end
     end
 
     def to_param
@@ -269,16 +276,6 @@ module Spree
         if item.states["backordered"].to_i > 0
           stock_location.restock_backordered item.variant, item.states["backordered"]
         end
-      end
-
-      def generate_shipment_number
-        return number unless number.blank?
-        record = true
-        while record
-          random = "H#{Array.new(11) { rand(9) }.join}"
-          record = self.class.where(number: random).first
-        end
-        self.number = random
       end
 
       def description_for_shipping_charge

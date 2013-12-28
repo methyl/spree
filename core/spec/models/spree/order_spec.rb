@@ -234,11 +234,6 @@ describe Spree::Order do
       expect(adjustments).to receive(:update_all).with(state: 'closed')
       order.finalize!
     end
-
-    it "should log state event" do
-      order.state_changes.should_receive(:create).exactly(2).times # shipment & payment state changes
-      order.finalize!
-    end
   end
 
   context "#process_payments!" do
@@ -499,6 +494,14 @@ describe Spree::Order do
 
   context "#confirmation_required?" do
 
+    # Regression test for #4117
+    it "is required if the state is currently 'confirm'" do
+      order = Spree::Order.new
+      assert !order.confirmation_required?
+      order.state = 'confirm'
+      assert order.confirmation_required?
+    end
+
     context 'Spree::Config[:always_include_confirm_step] == true' do
 
       before do
@@ -675,6 +678,28 @@ describe Spree::Order do
       it "returns true if the order has state == 'failed'" do
         order.is_risky?.should == true
       end
+    end
+  end
+
+  # Regression tests for #4072
+  context "#state_changed" do
+    let(:order) { FactoryGirl.create(:order) }
+
+    it "logs state changes" do
+      order.update_column(:payment_state, 'balance_due')
+      order.payment_state = 'paid'
+      expect(order.state_changes).to be_empty
+      order.state_changed('payment')
+      state_change = order.state_changes.find_by(:name => 'payment')
+      expect(state_change.previous_state).to eq('balance_due')
+      expect(state_change.next_state).to eq('paid')
+    end
+
+    it "does not do anything if state does not change" do
+      order.update_column(:payment_state, 'balance_due')
+      expect(order.state_changes).to be_empty
+      order.state_changed('payment')
+      expect(order.state_changes).to be_empty
     end
   end
 end

@@ -9,6 +9,8 @@ module Spree
     has_many :promotion_actions, foreign_key: :activator_id, autosave: true, dependent: :destroy
     alias_method :actions, :promotion_actions
 
+    has_and_belongs_to_many :orders, join_table: 'spree_orders_promotions'
+
     accepts_nested_attributes_for :promotion_actions, :promotion_rules
 
     validates_associated :rules
@@ -18,16 +20,14 @@ module Spree
     validates :usage_limit, numericality: { greater_than: 0, allow_nil: true }
     validates :description, length: { maximum: 255 }
 
-    # TODO: This shouldn't be necessary with :autosave option but nested attribute updating of actions is broken without it
-    after_save :save_rules_and_actions
     before_save :normalize_blank_values
-
-    def save_rules_and_actions
-      (rules + actions).each &:save
-    end
-
+    
     def self.advertised
       where(advertise: true)
+    end
+
+    def self.with_coupon_code(coupon_code)
+      where("lower(code) = ?", coupon_code.strip.downcase).first
     end
 
     def self.active
@@ -44,7 +44,13 @@ module Spree
     end
 
     def activate(payload)
-      return unless self.class.order_activatable?(payload[:order])
+      order = payload[:order]
+      return unless self.class.order_activatable?(order)
+
+      # connect to the order
+      #create the join_table entry.
+      self.orders << order
+      self.save
 
       # Track results from actions to see if any action has been taken.
       # Actions should return nil/false if no action has been taken.
@@ -98,7 +104,7 @@ module Spree
     end
 
     def credits
-      Adjustment.promotion.where(source_id: actions.map(&:id))
+      Adjustment.eligible.promotion.where(source_id: actions.map(&:id))
     end
 
     def credits_count

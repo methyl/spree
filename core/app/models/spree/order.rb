@@ -44,6 +44,8 @@ module Spree
     has_many :all_adjustments, class_name: 'Spree::Adjustment'
     has_many :inventory_units
 
+    has_and_belongs_to_many :promotions, join_table: 'spree_orders_promotions'
+
     has_many :shipments, dependent: :destroy do
       def states
         pluck(:state).uniq
@@ -164,7 +166,11 @@ module Spree
     # If true, causes the confirmation step to happen during the checkout process
     def confirmation_required?
       Spree::Config[:always_include_confirm_step] ||
-        payments.valid.map(&:payment_method).compact.any?(&:payment_profiles_supported?)
+        payments.valid.map(&:payment_method).compact.any?(&:payment_profiles_supported?) ||
+        # Little hacky fix for #4117
+        # If this wasn't here, order would transition to address state on confirm failure
+        # because there would be no valid payments any more.
+        state == 'confirm'
     end
 
     # Indicates the number of items in the order
@@ -434,12 +440,15 @@ module Spree
       state = "#{name}_state"
       if persisted?
         old_state = self.send("#{state}_was")
-        self.state_changes.create(
-          previous_state: old_state,
-          next_state:     self.send(state),
-          name:           name,
-          user_id:        self.user_id
-        )
+        new_state = self.send(state)
+        unless old_state == new_state
+          self.state_changes.create(
+            previous_state: old_state,
+            next_state:     new_state,
+            name:           name,
+            user_id:        self.user_id
+          )
+        end
       end
     end
 
@@ -518,7 +527,7 @@ module Spree
 
       # Determine if email is required (we don't want validation errors before we hit the checkout)
       def require_email
-        return true unless new_record? or state == 'cart'
+        return true unless new_record? or ['cart', 'address'].include?(state)
       end
 
       def ensure_line_items_present

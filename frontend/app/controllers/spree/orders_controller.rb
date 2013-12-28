@@ -20,7 +20,7 @@ module Spree
         respond_with(@order) do |format|
           format.html do
             if params.has_key?(:checkout)
-              @order.next_transition.run_callbacks if @order.cart?
+              @order.next if @order.cart?
               redirect_to checkout_state_path(@order.checkout_steps.first)
             else
               redirect_to cart_path
@@ -34,7 +34,7 @@ module Spree
 
     # Shows the current incomplete order from the session
     def edit
-      @order = current_order(true)
+      @order = current_order || Order.new
       associate_user
     end
 

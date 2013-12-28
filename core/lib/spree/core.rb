@@ -45,8 +45,9 @@ end
 
 require 'spree/core/version'
 
-require 'spree/core/mail_settings'
 require 'spree/core/mail_interceptor'
+require 'spree/core/mail_method'
+require 'spree/core/mail_settings'
 require 'spree/core/environment_extension'
 require 'spree/core/environment/calculators'
 require 'spree/core/environment'
@@ -68,7 +69,3 @@ require 'spree/core/controller_helpers'
 require 'spree/core/controller_helpers/strong_parameters'
 require 'spree/core/controller_helpers/ssl'
 require 'spree/core/controller_helpers/search'
-
-ActiveRecord::Base.class_eval do
-  include CollectiveIdea::Acts::NestedSet
-end

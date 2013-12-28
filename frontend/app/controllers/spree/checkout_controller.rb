@@ -25,9 +25,8 @@ module Spree
 
     # Updates the order and advances to the next state (when possible.)
     def update
-      if @order.update_attributes(object_params)
+      if @order.update_from_params(params, permitted_checkout_attributes)
         persist_user_address
-
         unless @order.next
           flash[:error] = @order.errors.full_messages.join("\n")
           redirect_to checkout_state_path(@order.state) and return
@@ -54,6 +53,13 @@ module Spree
             @order.state = 'cart'
             redirect_to checkout_state_path(@order.checkout_steps.first)
           end
+        end
+
+        # Fix for #4117
+        # If confirmation of payment fails, redirect back to payment screen
+        if params[:state] == "confirm" && @order.payments.valid.empty?
+          flash.keep
+          redirect_to checkout_state_path("payment")
         end
       end
 
@@ -93,32 +99,6 @@ module Spree
       # Provides a route to redirect after order completion
       def completion_route
         spree.order_path(@order)
-      end
-
-      # For payment step, filter order parameters to produce the expected nested
-      # attributes for a single payment and its source, discarding attributes
-      # for payment methods other than the one selected
-      def object_params
-        # has_checkout_step? check is necessary due to issue described in #2910
-        if @order.has_checkout_step?("payment") && @order.payment?
-          if params[:payment_source].present?
-            source_params = params.delete(:payment_source)[params[:order][:payments_attributes].first[:payment_method_id].underscore]
-
-            if source_params
-              params[:order][:payments_attributes].first[:source_attributes] = source_params
-            end
-          end
-
-          if (params[:order][:payments_attributes])
-            params[:order][:payments_attributes].first[:amount] = @order.total
-          end
-        end
-
-        if params[:order]
-          params[:order].permit(permitted_checkout_attributes)
-        else
-          {}
-        end
       end
 
       def setup_for_current_state
@@ -164,8 +144,10 @@ module Spree
       end
 
       def persist_user_address
-        if @order.address? && try_spree_current_user.respond_to?(:persist_order_address)
-          try_spree_current_user.persist_order_address(@order) if params[:save_user_address]
+        if @order.checkout_steps.include? "address"
+          if @order.address? && try_spree_current_user.respond_to?(:persist_order_address)
+            try_spree_current_user.persist_order_address(@order) if params[:save_user_address]
+          end
         end
       end
   end

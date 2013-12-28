@@ -46,13 +46,14 @@ describe Spree::OrdersController do
         end
 
         it "should render the edit view (on failure)" do
-          # email validation is only after cart state
-          order.update_column(:state, "address")
+          # email validation is only after address state
+          order.update_column(:state, "delivery")
           spree_put :update, { :order => { :email => "" } }, {:order_id => order.id }
           response.should render_template :edit
         end
 
         it "should redirect to cart path (on success)" do
+          controller.stub current_order: order
           order.stub(:update_attributes).and_return true
           spree_put :update, {}, {:order_id => 1}
           response.should redirect_to(spree.cart_path)
