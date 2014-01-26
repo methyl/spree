@@ -1,5 +1,10 @@
 ## Spree 2.2.0 (unreleased) ##
 
+* Don't serve JS to non XHR requests. Prevents sentive data leaking. Thanks to
+  Egor Homakov for pointing that out in Spree codebase.
+  See http://homakov.blogspot.com.br/2013/05/do-not-use-rjs-like-techniques.html
+  for details.
+
 * 'Only show completed orders' checkbox status will now persist when paging through orders.
 
     * darbs + Ryan Bigg
@@ -11,3 +16,7 @@
         CVV response (ie. code not matching)
 
     * Ben Radler (aka lordnibbler)
+
+* Moved 'Taxonomies' out from under 'Configuration' menu. It now is a sub-menu item on the products.
+
+    * Ryan Bigg

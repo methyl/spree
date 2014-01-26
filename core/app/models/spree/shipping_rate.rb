@@ -1,13 +1,13 @@
 module Spree
   class ShippingRate < ActiveRecord::Base
     belongs_to :shipment, class_name: 'Spree::Shipment'
-    belongs_to :shipping_method, class_name: 'Spree::ShippingMethod'
+    belongs_to :shipping_method, class_name: 'Spree::ShippingMethod', inverse_of: :shipping_rates
 
     scope :with_shipping_method,
       -> { includes(:shipping_method).
            references(:shipping_method).
            order("cost ASC") }
-    
+
     delegate :order, :currency, to: :shipment
     delegate :name, to: :shipping_method
 
@@ -22,5 +22,9 @@ module Spree
     end
 
     alias_method :display_cost, :display_price
+
+    def shipping_method
+      Spree::ShippingMethod.unscoped { super }
+    end
   end
 end

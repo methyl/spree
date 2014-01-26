@@ -25,7 +25,7 @@ module Spree
                                :city => "Sao Paulo", :zipcode => "1234567", :phone => "12345678",
                                :country_id => Country.first.id, :state_id => State.first.id} }
 
-    let!(:payment_method) { create(:payment_method) }
+    let!(:payment_method) { create(:check_payment_method) }
 
     let(:current_api_user) do
       user = Spree.user_class.new(:email => "spree@example.com")
@@ -208,7 +208,7 @@ module Spree
 
       let(:variant) { create(:variant) }
       let!(:line_item) { order.contents.add(variant, 1) }
-      let!(:payment_method) { create(:payment_method) }
+      let!(:payment_method) { create(:check_payment_method) }
 
       let(:address_params) { { :country_id => Country.first.id, :state_id => State.first.id } }
       let(:billing_address) { { :firstname => "Tiago", :lastname => "Motta", :address1 => "Av Paulista",
@@ -363,6 +363,15 @@ module Spree
           json_response['line_items'].first['variant'].should have_attributes([:product_id])
         end
 
+        it "includes the tax_total in the response" do
+          api_get :show, :id => order.to_param
+
+          json_response['included_tax_total'].should == '0.0'
+          json_response['additional_tax_total'].should == '0.0'
+          json_response['display_included_tax_total'].should == '$0.00'
+          json_response['display_additional_tax_total'].should == '$0.00'
+        end
+
         it "lists line item adjustments" do
           adjustment = create(:adjustment,
             :label => "10% off!",
@@ -388,6 +397,13 @@ module Spree
             order.ship_address = FactoryGirl.create(:address)
             order.state = 'delivery'
             order.save
+          end
+
+          it "includes the ship_total in the response" do
+            api_get :show, :id => order.to_param
+
+            json_response['ship_total'].should == '0.0'
+            json_response['display_ship_total'].should == '$0.00'
           end
 
           it "returns available shipments for an order" do

@@ -34,19 +34,21 @@ module Spree
     belongs_to :ship_address, foreign_key: :ship_address_id, class_name: 'Spree::Address'
     alias_attribute :shipping_address, :ship_address
 
+    alias_attribute :ship_total, :shipment_total
+
     has_many :state_changes, as: :stateful
-    has_many :line_items, -> { order('created_at ASC') }, dependent: :destroy
+    has_many :line_items, -> { order('created_at ASC') }, dependent: :destroy, inverse_of: :order
     has_many :payments, dependent: :destroy
     has_many :return_authorizations, dependent: :destroy
     has_many :adjustments, -> { order("#{Adjustment.table_name}.created_at ASC") }, as: :adjustable, dependent: :destroy
     has_many :line_item_adjustments, through: :line_items, source: :adjustments
     has_many :shipment_adjustments, through: :shipments, source: :adjustments
     has_many :all_adjustments, class_name: 'Spree::Adjustment'
-    has_many :inventory_units
+    has_many :inventory_units, inverse_of: :order
 
     has_and_belongs_to_many :promotions, join_table: 'spree_orders_promotions'
 
-    has_many :shipments, dependent: :destroy do
+    has_many :shipments, dependent: :destroy, inverse_of: :order do
       def states
         pluck(:state).uniq
       end
@@ -134,9 +136,10 @@ module Spree
       Spree::Money.new(additional_tax_total, { currency: currency })
     end
 
-    def display_ship_total
-      Spree::Money.new(ship_total, { currency: currency })
+    def display_shipment_total
+      Spree::Money.new(shipment_total, { currency: currency })
     end
+    alias :display_ship_total :display_shipment_total
 
     def display_total
       Spree::Money.new(total, { currency: currency })
@@ -275,10 +278,6 @@ module Spree
       line_items.detect { |line_item| line_item.variant_id == variant.id }
     end
 
-    def ship_total
-      shipments.sum(:cost)
-    end
-
     # Creates new tax charges if there are any applicable rates. If prices already
     # include taxes then price adjustments are created instead.
     def create_tax_charge!
@@ -346,7 +345,7 @@ module Spree
     end
 
     def available_payment_methods
-      @available_payment_methods ||= PaymentMethod.available(:front_end)
+      @available_payment_methods ||= (PaymentMethod.available(:front_end) + PaymentMethod.available(:both)).uniq
     end
 
     def pending_payments
@@ -485,6 +484,7 @@ module Spree
     def ensure_updated_shipments
       if shipments.any?
         self.shipments.destroy_all
+        self.update_column(:shipment_total, 0)
         restart_checkout_flow
       end
     end
@@ -551,6 +551,7 @@ module Spree
 
       def after_cancel
         shipments.each { |shipment| shipment.cancel! }
+        payments.completed.each { |payment| payment.credit! }
 
         send_cancel_email
         self.update_column(:payment_state, 'credit_owed') unless shipped?

@@ -46,6 +46,33 @@ describe Spree::Order do
     end
   end
 
+  context "#payments" do
+    it "does not have inverse_of defined" do
+      expect(Spree::Order.reflections[:payments].options[:inverse_of]).to be_nil
+    end
+
+    it "keeps source attributes after updating" do
+      persisted_order = Spree::Order.create
+      credit_card_payment_method = create(:credit_card_payment_method)
+      attributes = {
+        :payments_attributes => [
+          { 
+            :payment_method_id => credit_card_payment_method.id,
+            :source_attributes => {
+              :name => "Ryan Bigg",
+              :number => "41111111111111111111",
+              :expiry => "01 / 15",
+              :verification_value => "123"
+            }
+          }
+        ]
+      }
+
+      persisted_order.update_attributes(attributes)
+      expect(persisted_order.pending_payments.last.source.number).to be_present
+    end
+  end
+
   context "#generate_order_number" do
     it "should generate a random string" do
       order.generate_order_number.is_a?(String).should be_true
@@ -605,6 +632,12 @@ describe Spree::Order do
       order.ensure_updated_shipments
       expect(order.state).to eql "address"
     end
+
+    it "resets shipment_total" do
+      order.update_column(:shipment_total, 5)
+      order.ensure_updated_shipments
+      expect(order.shipment_total).to eq(0)
+    end
   end
 
   describe ".tax_address" do
@@ -700,6 +733,40 @@ describe Spree::Order do
       expect(order.state_changes).to be_empty
       order.state_changed('payment')
       expect(order.state_changes).to be_empty
+    end
+  end
+
+  # Regression test for #4199
+  context "#available_payment_methods" do
+    it "includes frontend payment methods" do
+      payment_method = Spree::PaymentMethod.create!({
+        :name => "Fake",
+        :active => true,
+        :display_on => "front_end",
+        :environment => Rails.env
+      })
+      expect(order.available_payment_methods).to include(payment_method)
+    end
+
+    it "includes 'both' payment methods" do
+      payment_method = Spree::PaymentMethod.create!({
+        :name => "Fake",
+        :active => true,
+        :display_on => "both",
+        :environment => Rails.env
+      })
+      expect(order.available_payment_methods).to include(payment_method)
+    end
+
+    it "does not include a payment method twice if display_on is blank" do
+      payment_method = Spree::PaymentMethod.create!({
+        :name => "Fake",
+        :active => true,
+        :display_on => "both",
+        :environment => Rails.env
+      })
+      expect(order.available_payment_methods.count).to eq(1)
+      expect(order.available_payment_methods).to include(payment_method)
     end
   end
 end

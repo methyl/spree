@@ -2,8 +2,8 @@ module Spree
   class Taxon < ActiveRecord::Base
     acts_as_nested_set dependent: :destroy
 
-    belongs_to :taxonomy, class_name: 'Spree::Taxonomy', :touch => true
-    has_many :classifications, -> { order(:position) }, dependent: :delete_all
+    belongs_to :taxonomy, class_name: 'Spree::Taxonomy', touch: true, inverse_of: :taxons
+    has_many :classifications, -> { order(:position) }, dependent: :delete_all, inverse_of: :taxon
     has_many :products, through: :classifications
 
     before_create :set_permalink
@@ -16,9 +16,6 @@ module Spree
       url: '/spree/taxons/:id/:style/:basename.:extension',
       path: ':rails_root/public/spree/taxons/:id/:style/:basename.:extension',
       default_url: '/assets/default_taxon.png'
-
-    include Spree::Core::S3Support
-    supports_s3 :icon
 
     include Spree::Core::ProductFilters  # for detailed defs of filters
 

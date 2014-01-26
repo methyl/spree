@@ -1,6 +1,6 @@
 module Spree
   class Price < ActiveRecord::Base
-    belongs_to :variant, class_name: 'Spree::Variant'
+    belongs_to :variant, class_name: 'Spree::Variant', inverse_of: :prices
 
     validate :check_price
     validates :amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
@@ -20,6 +20,11 @@ module Spree
 
     def price=(price)
       self[:amount] = parse_price(price)
+    end
+
+    # Remove variant default_scope `deleted_at: nil`
+    def variant
+      Spree::Variant.unscoped { super }
     end
 
     private
