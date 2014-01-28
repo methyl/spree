@@ -94,7 +94,7 @@ module Spree
     end
 
     def self.complete
-      where('completed_at IS NOT NULL')
+      where.not(completed_at: nil)
     end
 
     def self.incomplete
@@ -143,6 +143,10 @@ module Spree
 
     def display_total
       Spree::Money.new(total, { currency: currency })
+    end
+
+    def shipping_discount
+      shipment_adjustments.eligible.sum(:amount) * - 1
     end
 
     def to_param
@@ -314,7 +318,7 @@ module Spree
       touch :completed_at
 
       # lock all adjustments (coupon promotions, etc.)
-      adjustments.update_all state: 'closed'
+      all_adjustments.update_all state: 'closed'
 
       # update payment and shipment(s) states, and save
       updater.update_payment_state
@@ -476,6 +480,13 @@ module Spree
       shipments
     end
 
+    def apply_free_shipping_promotions
+      Spree::PromotionHandler::FreeShipping.new(self).activate
+      shipments.each { |shipment| ItemAdjustments.new(shipment).update }
+      updater.update_shipment_total
+      updater.persist_totals
+    end
+
     # Clean shipments and make order back to address state
     #
     # At some point the might need to force the order to transition from address
@@ -512,7 +523,7 @@ module Spree
 
     def is_risky?
       self.payments.where(%{
-        (avs_response IS NOT NULL and avs_response != 'D') or
+        (avs_response IS NOT NULL and avs_response != 'D' and avs_response != 'M') or
         (cvv_response_code IS NOT NULL and cvv_response_code != 'M') or
         cvv_response_message IS NOT NULL or
         state = 'failed'

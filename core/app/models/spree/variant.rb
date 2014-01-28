@@ -32,7 +32,7 @@ module Spree
       inverse_of: :variant
 
     validate :check_price
-    validates :price, numericality: { greater_than_or_equal_to: 0 }, presence: true, if: proc { Spree::Config[:require_master_price] }
+    validates :price, numericality: { greater_than_or_equal_to: 0 }
 
     validates :cost_price, numericality: { greater_than_or_equal_to: 0, allow_nil: true }
 
@@ -41,8 +41,10 @@ module Spree
     after_create :create_stock_items
     after_create :set_position
 
+    after_touch :clear_in_stock_cache
+
     # default variant scope only lists non-deleted variants
-    scope :deleted, lambda { where('deleted_at IS NOT NULL') }
+    scope :deleted, lambda { where.not(deleted_at: nil) }
 
     def self.active(currency = nil)
       joins(:prices).where(deleted_at: nil).where('spree_prices.currency' => currency || Spree::Config[:currency]).where('spree_prices.amount IS NOT NULL')
@@ -153,7 +155,13 @@ module Spree
       Spree::Product.unscoped { super }
     end
 
-    def in_stock?(quantity=1)
+    def in_stock?
+      Rails.cache.fetch(in_stock_cache_key) do
+        can_stock?(1)
+      end
+    end
+
+    def can_stock?(quantity=1)
       Spree::Stock::Quantifier.new(self).can_supply?(quantity)
     end
 
@@ -208,6 +216,14 @@ module Spree
 
       def set_position
         self.update_column(:position, product.variants.maximum(:position).to_i + 1)
+      end
+
+      def in_stock_cache_key
+        "variant-#{id}-in_stock"
+      end
+
+      def clear_in_stock_cache
+        Rails.cache.delete(in_stock_cache_key)
       end
   end
 end

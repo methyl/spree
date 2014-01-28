@@ -24,6 +24,11 @@ To fix this bug, we have moved the location of the assets to `vendor/assets`. Fr
 
 Similar changes to this have also been made to extensions, where their assets are now placed in `app/assets/spree/[extension_name]`. Ultimately, these changes fix the bug and now we're using the same names to refer to the same components (store -> frontend, admin -> backend) on assets as we do internally to Spree.
 
+You will need to manually rename asset requires within your application:
+
+* `admin/spree_backend` => `spree/backend`
+* `store/spree_frontend` => spree/frontend`
+
 *Ryan Bigg*
 
 ### Minor
@@ -58,3 +63,7 @@ Similar changes to this have also been made to extensions, where their assets ar
 *   Promotion#event_name attribute has been removed. A promotion's event now depends on the fields that are filled out during its creation.
 
     Ryan Bigg
+
+*   Simplified OrderPopulator to take only a variant_id and a quantity, rather than a confusing hash of product/variant ids.
+
+    Ryan Bigg  

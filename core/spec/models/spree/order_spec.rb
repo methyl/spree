@@ -47,6 +47,7 @@ describe Spree::Order do
   end
 
   context "#payments" do
+    # For the reason of this test, please see spree/spree_gateway#132
     it "does not have inverse_of defined" do
       expect(Spree::Order.reflections[:payments].options[:inverse_of]).to be_nil
     end
@@ -257,7 +258,7 @@ describe Spree::Order do
       order.stub :has_available_shipment
       Spree::OrderMailer.stub_chain :confirm_email, :deliver
       adjustments = double
-      order.stub :adjustments => adjustments
+      order.should_receive(:all_adjustments).and_return(adjustments)
       expect(adjustments).to receive(:update_all).with(state: 'closed')
       order.finalize!
     end
@@ -679,9 +680,19 @@ describe Spree::Order do
 
   describe ".is_risky?" do
     context "Not risky order" do
-      let(:order) { FactoryGirl.create(:order, payments: [FactoryGirl.create(:payment, avs_response: "D")]) }
-      it "returns false if the order's avs_response == 'A'" do
-        order.is_risky?.should == false
+      let(:order) { FactoryGirl.create(:order, payments: [payment]) }
+      context "with avs_response == D" do
+        let(:payment) { FactoryGirl.create(:payment, avs_response: "D") }
+        it "is not considered risky" do
+          order.is_risky?.should == false
+        end
+      end
+
+      context "with avs_response == M" do
+        let(:payment) { FactoryGirl.create(:payment, avs_response: "M") }
+        it "is not considered risky" do
+          order.is_risky?.should == false
+        end
       end
     end
 
@@ -767,6 +778,22 @@ describe Spree::Order do
       })
       expect(order.available_payment_methods.count).to eq(1)
       expect(order.available_payment_methods).to include(payment_method)
+    end
+  end
+
+  context "#apply_free_shipping_promotions" do
+    it "calls out to the FreeShipping promotion handler" do
+      shipment = double('Shipment')
+      order.stub :shipments => [shipment]
+      Spree::PromotionHandler::FreeShipping.should_receive(:new).and_return(handler = double)
+      handler.should_receive(:activate)
+
+      Spree::ItemAdjustments.should_receive(:new).with(shipment).and_return(adjuster = double)
+      adjuster.should_receive(:update)
+
+      order.updater.should_receive(:update_shipment_total)
+      order.updater.should_receive(:persist_totals)
+      order.apply_free_shipping_promotions
     end
   end
 end
