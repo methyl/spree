@@ -475,6 +475,8 @@ module Spree
         shipments << package.to_shipment
       end
 
+      set_shipments_cost
+
       shipments
     end
 
