@@ -48,7 +48,7 @@ describe "Checkout", inaccessible: true do
     # Regression test for #1596
     context "full checkout" do
       before do
-        shipping_method.calculator.preferred_amount = 10
+        shipping_method.calculator.update!(preferred_amount: 10)
         mug.shipping_category = shipping_method.shipping_categories.first
         mug.save!
       end
@@ -64,6 +64,20 @@ describe "Checkout", inaccessible: true do
         page.should_not have_content("undefined method `promotion'")
         click_button "Save and Continue"
         page.should have_content("Shipping total $10.00")
+      end
+    end
+
+    # Regression test for #4306
+    context "free shipping" do
+      before do
+        add_mug_to_cart
+        click_button "Checkout"
+      end
+
+      it "should not show 'Free Shipping' when there are no shipments" do
+        within("#checkout-summary") do
+          expect(page).to_not have_content('Free Shipping')
+        end
       end
     end
   end
